@@ -1,8 +1,14 @@
 import os
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
 from flask import Flask, request, jsonify
+
 app = Flask(__name__)
 
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "")
+LARAVEL_WEBHOOK_URL = os.environ.get("LARAVEL_WEBHOOK_URL", "")
+LARAVEL_WEBHOOK_SECRET = os.environ.get("LARAVEL_WEBHOOK_SECRET", "")
 
 
 @app.route("/")
@@ -24,12 +30,30 @@ def verify_webhook():
 
 @app.route("/webhook", methods=["POST"])
 def receive_webhook():
-    data = request.get_json()
+    body = request.get_data()
 
-    print("WhatsApp Webhook received:")
-    print(data)
+    if not LARAVEL_WEBHOOK_URL or not LARAVEL_WEBHOOK_SECRET:
+        return jsonify({"status": "forwarding_failed"}), 500
 
-    return jsonify({"status": "received"}), 200
+    forwarded_request = Request(
+        LARAVEL_WEBHOOK_URL,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LARAVEL_WEBHOOK_SECRET}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(forwarded_request, timeout=15) as response:
+            if 200 <= response.status < 300:
+                return jsonify({"status": "received"}), 200
+
+    except (HTTPError, URLError, TimeoutError):
+        pass
+
+    return jsonify({"status": "forwarding_failed"}), 502
 
 
 if __name__ == "__main__":
